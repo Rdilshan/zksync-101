@@ -80,6 +80,54 @@ contract PolygonPaymaster is Ownable {
     }
 
     /**
+     * @dev Execute a meta-transaction that includes the original user address in the call
+     * This is useful for contracts that need to know the original user (not the relayer)
+     */
+    function executeMetaTransactionWithUser(
+        address user,
+        address target,
+        uint256 value,
+        bytes4 functionSelector,
+        bytes memory additionalData,
+        bytes memory signature
+    ) public returns (bool success, bytes memory returnData) {
+        // Get the current nonce for this user
+        uint256 currentNonce = nonces[user];
+
+        // Create the complete function call data with user address as first parameter
+        bytes memory data = abi.encodePacked(functionSelector, abi.encode(user), additionalData);
+
+        // Create the message hash
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                user,
+                target,
+                value,
+                data,
+                currentNonce,
+                address(this)
+            )
+        );
+
+        // Convert to Ethereum signed message hash
+        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+
+        // Verify the signature
+        address recoveredSigner = ethSignedMessageHash.recover(signature);
+        require(recoveredSigner == user, "Invalid signature");
+
+        // Increment nonce to prevent replay attacks
+        nonces[user]++;
+
+        // Execute the transaction
+        (success, returnData) = target.call{value: value}(data);
+
+        emit MetaTransactionExecuted(user, target, currentNonce, success, returnData);
+
+        return (success, returnData);
+    }
+
+    /**
      * @dev Get the current nonce for a user
      */
     function getNonce(address user) public view returns (uint256) {

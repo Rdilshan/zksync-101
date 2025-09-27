@@ -1,8 +1,8 @@
 import {ethers} from "hardhat";
 
-// Deployed contract addresses
-const PAYMASTER_ADDRESS = "0xD8F5F67391dCFdcC5F7eE429b3D5DF4878f6DFAC";
-const COUNTER_ADDRESS = "0xE2145A58917293B8D97a349dcf8e75230D9c290A";
+// Updated contract addresses with new user tracking functionality
+const PAYMASTER_ADDRESS = "0xcb1d0aac729D0591fCe76C8d604D2B6b2dfa5Ff4";
+const COUNTER_ADDRESS = "0x1C92c2485d4512e304adD509499900Be39B22Af5";
 
 async function main() {
 	console.log("=== Testing Polygon Gasless Transactions ===");
@@ -35,9 +35,16 @@ async function main() {
 	// Prepare meta-transaction
 	console.log("\n--- Preparing Meta-Transaction ---");
 
-	// Encode the function call (increment counter)
+	// Encode the function call (increment counter for specific user)
 	const counterInterface = counter.interface;
-	const functionData = counterInterface.encodeFunctionData("increment", []);
+	const functionSelector =
+		counterInterface.getFunction("incrementForUser").selector;
+	const functionData = counterInterface.encodeFunctionData("incrementForUser", [
+		user.address,
+	]);
+
+	console.log("Function selector:", functionSelector);
+	console.log("Using incrementForUser to track original user");
 
 	console.log("Function data:", functionData);
 
@@ -87,11 +94,13 @@ async function main() {
 	console.log("🚀 Relayer executing transaction on behalf of user...");
 
 	try {
-		const tx = await paymaster.connect(relayer).executeMetaTransaction(
+		// Use the new function that properly tracks the original user
+		const tx = await paymaster.connect(relayer).executeMetaTransactionWithUser(
 			user.address, // user who signed
 			counter.target, // target contract
 			0, // value
-			functionData, // function call data
+			functionSelector, // function selector
+			"0x", // additional data (empty for incrementForUser)
 			signature // user's signature
 		);
 
@@ -105,11 +114,33 @@ async function main() {
 		console.log("\n--- Final State ---");
 		const finalCounter = await counter.getCounter();
 		const finalUserCounter = await counter.getUserCounter(user.address);
+		const finalRelayerCounter = await counter.getUserCounter(relayer.address);
 		const finalUserNonce = await paymaster.getNonce(user.address);
 
+		// Get detailed user stats
+		const [userCurrentCounter, userIncrementCount, userTotalIncremented] =
+			await counter.getUserStats(user.address);
+		const [
+			relayerCurrentCounter,
+			relayerIncrementCount,
+			relayerTotalIncremented,
+		] = await counter.getUserStats(relayer.address);
+
 		console.log("Global counter:", finalCounter.toString(), "(+1)");
-		console.log("User counter:", finalUserCounter.toString(), "(+1)");
-		console.log("User nonce:", finalUserNonce.toString(), "(+1)");
+		console.log("\n📊 User Stats (should show increment now!):");
+		console.log("  - Counter value:", userCurrentCounter.toString());
+		console.log("  - Times incremented:", userIncrementCount.toString());
+		console.log("  - Total increment amount:", userTotalIncremented.toString());
+
+		console.log("\n📊 Relayer Stats (should be 0 now):");
+		console.log("  - Counter value:", relayerCurrentCounter.toString());
+		console.log("  - Times incremented:", relayerIncrementCount.toString());
+		console.log(
+			"  - Total increment amount:",
+			relayerTotalIncremented.toString()
+		);
+
+		console.log("\nUser nonce:", finalUserNonce.toString(), "(+1)");
 
 		// Check balances after transaction
 		console.log("\n--- Balances After Transaction ---");
