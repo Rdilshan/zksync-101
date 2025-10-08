@@ -49,8 +49,8 @@ async function main() {
 	console.log("\n--- Test 1: Register Wallets ---");
 
 	// Test data
-	const nic1 = "987654321V";
-	const nic2 = "123456789X";
+	const nic1 = "117654321V";
+	const nic2 = "143456789X";
 
 	try {
 		// Register user1's wallet with nic1

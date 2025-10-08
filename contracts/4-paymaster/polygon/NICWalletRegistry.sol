@@ -35,6 +35,9 @@ contract NICWalletRegistry is Ownable {
     // Session management
     mapping(address => mapping(address => uint256)) public sessionExpiry;
     mapping(address => uint256) public sessionNonce;
+    
+    // System wallet authorization
+    mapping(address => bool) public authorizedSystemWallets;
 
     // Events
     event WalletRegistered(bytes32 indexed nicHash, address indexed walletAddress, uint256 timestamp);
@@ -42,6 +45,7 @@ contract NICWalletRegistry is Ownable {
     event TemporaryAccessRevoked(bytes32 indexed nicHash, address indexed temporaryWallet);
     event SessionCreated(address indexed originalWallet, address indexed temporaryWallet, uint256 expiryTime);
     event TransactionExecuted(address indexed originalWallet, address indexed executor, address target, bytes data);
+    event SystemWalletAuthorized(address indexed systemWallet, bool authorized);
 
     // Constants
     uint256 public constant DEFAULT_SESSION_DURATION = 24 hours;
@@ -103,8 +107,11 @@ contract NICWalletRegistry is Ownable {
         require(originalWallet != address(0), "NIC not registered");
         require(nicToWallet[nicHash].isActive, "Wallet is inactive");
 
-        // Only the original wallet owner can create sessions
-        require(msg.sender == originalWallet, "Only wallet owner can create sessions");
+        // Only the original wallet owner or authorized system wallet can create sessions
+        require(
+            msg.sender == originalWallet || authorizedSystemWallets[msg.sender], 
+            "Only wallet owner or authorized system wallet can create sessions"
+        );
 
         uint256 expiryTime = block.timestamp + (duration > 0 ? duration : DEFAULT_SESSION_DURATION);
         
@@ -197,6 +204,17 @@ contract NICWalletRegistry is Ownable {
      */
     function isWalletRegistered(address walletAddress) external view returns (bool) {
         return registeredWallets[walletAddress];
+    }
+
+    /**
+     * @dev Authorize a system wallet to create sessions (only owner can call)
+     * @param systemWallet The system wallet address to authorize
+     * @param authorized Whether to authorize or revoke authorization
+     */
+    function authorizeSystemWallet(address systemWallet, bool authorized) external onlyOwner {
+        require(systemWallet != address(0), "Invalid system wallet address");
+        authorizedSystemWallets[systemWallet] = authorized;
+        emit SystemWalletAuthorized(systemWallet, authorized);
     }
 
     /**
