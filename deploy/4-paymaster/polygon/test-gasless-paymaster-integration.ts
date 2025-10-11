@@ -2,7 +2,7 @@ import {ethers} from "hardhat";
 
 // Contract addresses - Update these with your deployed contract addresses
 const NIC_REGISTRY_ADDRESS = "0x24D2Caf2fd29D503e72AdD19a5c56C2452d2e5C1";
-const NIC_PAYMASTER_ADDRESS = "0xcb1d0aac729D0591fCe76C8d604D2B6b2dfa5Ff4"; // Make sure this is the correct NICPaymaster address
+const NIC_PAYMASTER_ADDRESS = "0xE2D89a2f526e828579Da11AdeE60dDb645303440"; // Make sure this is the correct NICPaymaster address
 const COUNTER_ADDRESS = "0x1C92c2485d4512e304adD509499900Be39B22Af5";
 
 // Test data

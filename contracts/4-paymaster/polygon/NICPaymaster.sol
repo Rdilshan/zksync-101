@@ -149,37 +149,9 @@ contract NICPaymaster is Ownable {
         // Increment nonce to prevent replay attacks
         tempWalletNonces[temporaryWallet]++;
 
-        // Modify the data to include the original wallet as the first parameter
-        // This assumes the target contract has functions that accept the original user as first param
-        bytes memory modifiedData;
-        if (data.length >= 4) {
-            // Extract function selector (first 4 bytes)
-            bytes4 functionSelector;
-            assembly {
-                functionSelector := mload(add(data, 0x20))
-            }
-            
-            // Extract remaining data after function selector
-            bytes memory remainingData;
-            if (data.length > 4) {
-                remainingData = new bytes(data.length - 4);
-                for (uint256 i = 4; i < data.length; i++) {
-                    remainingData[i - 4] = data[i];
-                }
-            }
-            
-            // Create new data with originalWallet as first parameter
-            modifiedData = abi.encodePacked(
-                functionSelector,
-                abi.encode(originalWallet),
-                remainingData
-            );
-        } else {
-            modifiedData = data;
-        }
-
-        // Execute the transaction
-        (success, returnData) = target.call{value: value}(modifiedData);
+        // Execute the transaction directly with the provided data
+        // The data should already be properly formatted with the original wallet parameter
+        (success, returnData) = target.call{value: value}(data);
 
         emit TemporaryWalletTransactionExecuted(
             originalWallet, 
@@ -313,36 +285,9 @@ contract NICPaymaster is Ownable {
         // Increment nonce to prevent replay attacks
         tempWalletNonces[temporaryWallet]++;
 
-        // Modify the data to include the original wallet as the first parameter
-        bytes memory modifiedData;
-        if (data.length >= 4) {
-            // Extract function selector (first 4 bytes)
-            bytes4 functionSelector;
-            assembly {
-                functionSelector := mload(add(data, 0x20))
-            }
-            
-            // Extract remaining data after function selector
-            bytes memory remainingData;
-            if (data.length > 4) {
-                remainingData = new bytes(data.length - 4);
-                for (uint256 i = 4; i < data.length; i++) {
-                    remainingData[i - 4] = data[i];
-                }
-            }
-            
-            // Create new data with originalWallet as first parameter
-            modifiedData = abi.encodePacked(
-                functionSelector,
-                abi.encode(originalWallet),
-                remainingData
-            );
-        } else {
-            modifiedData = data;
-        }
-
-        // Execute the transaction (relayer pays gas)
-        (success, returnData) = target.call{value: value}(modifiedData);
+        // Execute the transaction directly with the provided data
+        // The data should already be properly formatted with the original wallet parameter
+        (success, returnData) = target.call{value: value}(data);
 
         emit TemporaryWalletTransactionExecuted(
             originalWallet, 
