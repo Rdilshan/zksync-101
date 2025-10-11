@@ -22,6 +22,9 @@ contract NICPaymaster is Ownable {
     
     // Track temporary wallet nonces separately
     mapping(address => uint256) public tempWalletNonces;
+    
+    // Track temporary wallet to original wallet relationships
+    mapping(address => address) public tempWalletToOriginal;
 
     // Events
     event MetaTransactionExecuted(
@@ -223,15 +226,28 @@ contract NICPaymaster is Ownable {
     }
 
     /**
+     * @dev Register a temporary wallet relationship
+     * @param temporaryWallet The temporary wallet address
+     * @param originalWallet The original wallet address
+     */
+    function registerTemporaryWallet(address temporaryWallet, address originalWallet) external {
+        require(temporaryWallet != address(0), "Invalid temporary wallet");
+        require(originalWallet != address(0), "Invalid original wallet");
+        require(
+            walletRegistry.hasValidAccess(originalWallet, temporaryWallet),
+            "Temporary wallet access not valid"
+        );
+        
+        tempWalletToOriginal[temporaryWallet] = originalWallet;
+    }
+
+    /**
      * @dev Find the original wallet for a temporary wallet
      * @param temporaryWallet The temporary wallet address
      * @return The original wallet address, or address(0) if not found
      */
     function _findOriginalWallet(address temporaryWallet) private view returns (address) {
-        // This is a simplified approach - in practice you might want to maintain
-        // a more efficient mapping or use events to track relationships
-        // For now, we'll return address(0) and handle this in the frontend
-        return address(0);
+        return tempWalletToOriginal[temporaryWallet];
     }
 
     /**
@@ -246,6 +262,98 @@ contract NICPaymaster is Ownable {
      */
     function getTempWalletNonce(address tempWallet) public view returns (uint256) {
         return tempWalletNonces[tempWallet];
+    }
+
+    /**
+     * @dev Execute gasless transaction for temporary wallet (relayer pays gas)
+     * @param originalWallet The original wallet that owns the assets
+     * @param temporaryWallet The temporary wallet that signed the transaction
+     * @param target The contract address to call
+     * @param value The ETH value to send with the transaction
+     * @param data The function call data
+     * @param signature The temporary wallet's signature
+     */
+    function executeGaslessTemporaryTransaction(
+        address originalWallet,
+        address temporaryWallet,
+        address target,
+        uint256 value,
+        bytes memory data,
+        bytes memory signature
+    ) external returns (bool success, bytes memory returnData) {
+        // Verify that the temporary wallet has valid access
+        require(
+            walletRegistry.hasValidAccess(originalWallet, temporaryWallet),
+            "Temporary wallet access expired or invalid"
+        );
+
+        // Get the current nonce for this temporary wallet
+        uint256 currentNonce = tempWalletNonces[temporaryWallet];
+
+        // Create the message hash (includes both wallets for security)
+        bytes32 messageHash = keccak256(
+            abi.encodePacked(
+                originalWallet,
+                temporaryWallet,
+                target,
+                value,
+                data,
+                currentNonce,
+                address(this)
+            )
+        );
+
+        // Convert to Ethereum signed message hash
+        bytes32 ethSignedMessageHash = messageHash.toEthSignedMessageHash();
+
+        // Verify the signature from temporary wallet
+        address recoveredSigner = ethSignedMessageHash.recover(signature);
+        require(recoveredSigner == temporaryWallet, "Invalid temporary wallet signature");
+
+        // Increment nonce to prevent replay attacks
+        tempWalletNonces[temporaryWallet]++;
+
+        // Modify the data to include the original wallet as the first parameter
+        bytes memory modifiedData;
+        if (data.length >= 4) {
+            // Extract function selector (first 4 bytes)
+            bytes4 functionSelector;
+            assembly {
+                functionSelector := mload(add(data, 0x20))
+            }
+            
+            // Extract remaining data after function selector
+            bytes memory remainingData;
+            if (data.length > 4) {
+                remainingData = new bytes(data.length - 4);
+                for (uint256 i = 4; i < data.length; i++) {
+                    remainingData[i - 4] = data[i];
+                }
+            }
+            
+            // Create new data with originalWallet as first parameter
+            modifiedData = abi.encodePacked(
+                functionSelector,
+                abi.encode(originalWallet),
+                remainingData
+            );
+        } else {
+            modifiedData = data;
+        }
+
+        // Execute the transaction (relayer pays gas)
+        (success, returnData) = target.call{value: value}(modifiedData);
+
+        emit TemporaryWalletTransactionExecuted(
+            originalWallet, 
+            temporaryWallet, 
+            target, 
+            currentNonce, 
+            success, 
+            returnData
+        );
+
+        return (success, returnData);
     }
 
     /**

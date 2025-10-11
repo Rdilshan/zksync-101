@@ -1,8 +1,8 @@
 import {ethers} from "hardhat";
 
-// Contract addresses
+// Contract addresses - Update these with your deployed contract addresses
 const NIC_REGISTRY_ADDRESS = "0x24D2Caf2fd29D503e72AdD19a5c56C2452d2e5C1";
-const PAYMASTER_ADDRESS = "0xcb1d0aac729D0591fCe76C8d604D2B6b2dfa5Ff4";
+const NIC_PAYMASTER_ADDRESS = "0xcb1d0aac729D0591fCe76C8d604D2B6b2dfa5Ff4"; // Update with new NICPaymaster address
 const COUNTER_ADDRESS = "0x1C92c2485d4512e304adD509499900Be39B22Af5";
 
 // Test data
@@ -10,9 +10,9 @@ const TEST_NIC = "1234";
 const REGISTERED_WALLET = "0x835a5220EC26fcFe855dC0957cE483f03A8Bb028";
 
 async function main() {
-	console.log("=== Testing Session + Paymaster Integration ===");
+	console.log("=== Testing Gasless Session + NICPaymaster Integration ===");
 	console.log(
-		"Testing if temporary wallet can act like NIC account using paymaster"
+		"Testing if temporary wallet can use gasless transactions (NICPaymaster pays gas)"
 	);
 
 	const signers = await ethers.getSigners();
@@ -22,23 +22,53 @@ async function main() {
 	console.log("Test NIC:", TEST_NIC);
 	console.log("Registered Wallet:", REGISTERED_WALLET);
 	console.log("NIC Registry:", NIC_REGISTRY_ADDRESS);
-	console.log("Paymaster:", PAYMASTER_ADDRESS);
+	console.log("NIC Paymaster:", NIC_PAYMASTER_ADDRESS);
 	console.log("Counter:", COUNTER_ADDRESS);
 
+	// Check network
+	const network = await ethers.provider.getNetwork();
+	console.log("Network:", network.name, "Chain ID:", network.chainId);
+
 	// Get contract instances
+	console.log("Connecting to contracts...");
+
 	const registry = await ethers.getContractAt(
 		"NICWalletRegistry",
 		NIC_REGISTRY_ADDRESS
 	);
-	const paymaster = await ethers.getContractAt(
-		"PolygonPaymaster",
-		PAYMASTER_ADDRESS
+	console.log("✅ Connected to NICWalletRegistry");
+
+	const nicPaymaster = await ethers.getContractAt(
+		"NICPaymaster",
+		NIC_PAYMASTER_ADDRESS
 	);
+	console.log("✅ Connected to NICPaymaster");
+
 	const counter = await ethers.getContractAt("SimpleCounter", COUNTER_ADDRESS);
+	console.log("✅ Connected to SimpleCounter");
+
+	// Check NICPaymaster balance and fund if needed
+	const paymasterBalance = await nicPaymaster.getBalance();
+	console.log(
+		"NICPaymaster balance:",
+		ethers.formatEther(paymasterBalance),
+		"ETH"
+	);
+
+	if (paymasterBalance === 0n) {
+		console.log("⚠️  NICPaymaster has no funds! Funding it with 0.5 ETH...");
+		const fundTx = await nicPaymaster.deposit({
+			value: ethers.parseEther("0.5"),
+		});
+		await fundTx.wait();
+		console.log("✅ NICPaymaster funded successfully");
+	}
 
 	try {
 		// Step 1: Verify the NIC is registered
 		console.log("\n--- Step 1: Verify NIC Registration ---");
+		console.log("Checking if NIC 1234 is registered...");
+
 		const registeredWallet = await registry.getWalletByNIC(TEST_NIC);
 		console.log("Retrieved wallet for NIC 1234:", registeredWallet);
 
@@ -66,6 +96,7 @@ async function main() {
 		const tempWallet = ethers.Wallet.createRandom();
 		console.log("Temporary wallet address:", tempWallet.address);
 		console.log("Temporary wallet private key:", tempWallet.privateKey);
+		console.log("💡 NO ETH needed in temporary wallet - gasless transaction!");
 
 		// Step 4: Create session using system wallet
 		console.log("\n--- Step 4: Create Session ---");
@@ -97,19 +128,19 @@ async function main() {
 		console.log("\n--- Step 6: Check Initial Counter State ---");
 		const initialCounter = await counter.getCounter();
 		const initialUserCounter = await counter.getUserCounter(REGISTERED_WALLET);
-		const userNonce = await paymaster.getNonce(REGISTERED_WALLET);
 
 		console.log("Global counter:", initialCounter.toString());
 		console.log(
 			"User counter (registered wallet):",
 			initialUserCounter.toString()
 		);
-		console.log("User nonce:", userNonce.toString());
 
-		// Step 7: Prepare transaction using executeOnBehalf
-		console.log("\n--- Step 7: Prepare Transaction via executeOnBehalf ---");
+		// Step 7: Prepare gasless transaction using NICPaymaster
 		console.log(
-			"🎯 Temporary wallet will use executeOnBehalf to act as registered wallet"
+			"\n--- Step 7: Prepare Gasless Transaction with NICPaymaster ---"
+		);
+		console.log(
+			"🎯 Temporary wallet will sign transaction, NICPaymaster will pay gas"
 		);
 
 		// Connect temporary wallet to provider
@@ -125,9 +156,42 @@ async function main() {
 		);
 
 		console.log("Function data:", functionData);
-		console.log("Target contract:", counter.target);
-		console.log("Registered wallet:", REGISTERED_WALLET);
-		console.log("Temporary wallet (executor):", tempWallet.address);
+		console.log("Target wallet (registered):", REGISTERED_WALLET);
+		console.log("Temporary wallet will sign, NICPaymaster will pay gas");
+
+		// Get nonce for temporary wallet
+		const tempWalletNonce = await nicPaymaster.getNonce(tempWallet.address);
+		console.log("Temporary wallet nonce:", tempWalletNonce.toString());
+
+		// Create message hash for signature
+		const messageHash = ethers.solidityPackedKeccak256(
+			[
+				"address",
+				"address",
+				"address",
+				"uint256",
+				"bytes",
+				"uint256",
+				"address",
+			],
+			[
+				REGISTERED_WALLET, // original wallet
+				tempWallet.address, // temporary wallet
+				counter.target, // target contract
+				0, // value (0 ETH)
+				functionData, // function call data
+				tempWalletNonce, // nonce
+				nicPaymaster.target, // paymaster address
+			]
+		);
+
+		console.log("Message hash:", messageHash);
+
+		// Sign the message with temporary wallet's private key
+		const signature = await tempWalletConnected.signMessage(
+			ethers.getBytes(messageHash)
+		);
+		console.log("Temporary wallet signature:", signature);
 
 		// Step 8: Check balances before transaction
 		console.log("\n--- Step 8: Balances Before Transaction ---");
@@ -140,6 +204,7 @@ async function main() {
 		const registeredWalletBalanceBefore = await ethers.provider.getBalance(
 			REGISTERED_WALLET
 		);
+		const paymasterBalanceBefore = await nicPaymaster.getBalance();
 
 		console.log(
 			"Relayer balance:",
@@ -149,39 +214,49 @@ async function main() {
 		console.log(
 			"Temporary wallet balance:",
 			ethers.formatEther(tempWalletBalanceBefore),
-			"ETH"
+			"ETH (should be 0 - gasless!)"
 		);
 		console.log(
 			"Registered wallet balance:",
 			ethers.formatEther(registeredWalletBalanceBefore),
 			"ETH"
 		);
-
-		// Step 9: Execute transaction using executeOnBehalf
-		console.log("\n--- Step 9: Execute Transaction via executeOnBehalf ---");
 		console.log(
-			"🚀 Temporary wallet executing transaction on behalf of registered wallet..."
+			"NICPaymaster balance:",
+			ethers.formatEther(paymasterBalanceBefore),
+			"ETH"
 		);
-		console.log("💡 Using NICWalletRegistry.executeOnBehalf function");
 
-		// The temporary wallet calls executeOnBehalf on the NICWalletRegistry
-		// This will execute the counter function on behalf of the registered wallet
-		const tx = await registry.connect(tempWalletConnected).executeOnBehalf(
-			REGISTERED_WALLET, // original wallet (registered wallet)
-			counter.target, // target contract (counter)
-			functionData // function call data
+		// Step 9: Execute gasless transaction using NICPaymaster
+		console.log(
+			"\n--- Step 9: Execute Gasless Transaction with NICPaymaster ---"
 		);
+		console.log(
+			"🚀 Relayer executing gasless transaction for temporary wallet..."
+		);
+		console.log("💡 Temporary wallet signed the transaction");
+		console.log("💡 NICPaymaster pays gas fees");
+
+		const tx = await nicPaymaster
+			.connect(deployer)
+			.executeTemporaryWalletTransaction(
+				REGISTERED_WALLET, // original wallet (registered wallet)
+				tempWallet.address, // temporary wallet
+				counter.target, // target contract
+				0, // value (0 ETH)
+				functionData, // function call data
+				signature // temporary wallet's signature
+			);
 
 		console.log("Transaction hash:", tx.hash);
 		const receipt = await tx.wait();
 		console.log("✅ Transaction successful!");
-		console.log("Gas used:", receipt.gasUsed.toString());
+		console.log("Gas used:", receipt?.gasUsed.toString() || "unknown");
 
 		// Step 10: Check final state
 		console.log("\n--- Step 10: Final State ---");
 		const finalCounter = await counter.getCounter();
 		const finalUserCounter = await counter.getUserCounter(REGISTERED_WALLET);
-		const finalUserNonce = await paymaster.getNonce(REGISTERED_WALLET);
 
 		// Get detailed user stats
 		const [userCurrentCounter, userIncrementCount, userTotalIncremented] =
@@ -192,7 +267,6 @@ async function main() {
 		console.log("  - Counter value:", userCurrentCounter.toString());
 		console.log("  - Times incremented:", userIncrementCount.toString());
 		console.log("  - Total increment amount:", userTotalIncremented.toString());
-		console.log("User nonce:", finalUserNonce.toString(), "(+1)");
 
 		// Step 11: Check balances after transaction
 		console.log("\n--- Step 11: Balances After Transaction ---");
@@ -205,6 +279,7 @@ async function main() {
 		const registeredWalletBalanceAfter = await ethers.provider.getBalance(
 			REGISTERED_WALLET
 		);
+		const paymasterBalanceAfter = await nicPaymaster.getBalance();
 
 		console.log(
 			"Relayer balance:",
@@ -214,19 +289,29 @@ async function main() {
 		console.log(
 			"Temporary wallet balance:",
 			ethers.formatEther(tempWalletBalanceAfter),
-			"ETH"
+			"ETH (should be 0 - gasless!)"
 		);
 		console.log(
 			"Registered wallet balance:",
 			ethers.formatEther(registeredWalletBalanceAfter),
 			"ETH"
 		);
+		console.log(
+			"NICPaymaster balance:",
+			ethers.formatEther(paymasterBalanceAfter),
+			"ETH"
+		);
 
 		console.log("\n--- Balance Changes ---");
 		console.log(
+			"Relayer paid:",
+			ethers.formatEther(relayerBalanceBefore - relayerBalanceAfter),
+			"ETH (gas fees for paymaster execution)"
+		);
+		console.log(
 			"Temporary wallet paid:",
 			ethers.formatEther(tempWalletBalanceBefore - tempWalletBalanceAfter),
-			"ETH (gas fees - temporary wallet pays its own gas)"
+			"ETH (should be 0 - gasless!)"
 		);
 		console.log(
 			"Registered wallet paid:",
@@ -234,6 +319,11 @@ async function main() {
 				registeredWalletBalanceBefore - registeredWalletBalanceAfter
 			),
 			"ETH (should be 0!)"
+		);
+		console.log(
+			"NICPaymaster paid:",
+			ethers.formatEther(paymasterBalanceBefore - paymasterBalanceAfter),
+			"ETH (gas fees)"
 		);
 
 		// Step 12: Verify session is still valid
@@ -252,9 +342,13 @@ async function main() {
 		console.log("✅ Session created successfully");
 		console.log("✅ Session verified and active");
 		console.log("✅ Temporary wallet can control registered wallet");
-		console.log("✅ Meta-transaction executed successfully");
+		console.log(
+			"✅ Gasless transaction executed successfully using NICPaymaster"
+		);
 		console.log("✅ Counter incremented for registered wallet");
-		console.log("✅ Gas paid by temporary wallet, not by registered wallet");
+		console.log(
+			"✅ Gas paid by NICPaymaster, temporary and registered wallets paid nothing"
+		);
 		console.log("✅ Session remains valid after transaction");
 
 		console.log("\n=== Key Information ===");
@@ -264,23 +358,29 @@ async function main() {
 		console.log("Temporary Private Key:", tempWallet.privateKey);
 		console.log("Session Transaction:", sessionTx.hash);
 		console.log("Counter Transaction:", tx.hash);
-		console.log(
-			"Session Expires:",
-			new Date(
-				(
-					await registry.getSessionInfo(REGISTERED_WALLET, tempWallet.address)
-				)[0] * 1000
-			)
+		const [expiryTime] = await registry.getSessionInfo(
+			REGISTERED_WALLET,
+			tempWallet.address
 		);
+		console.log("Session Expires:", new Date(Number(expiryTime) * 1000));
 
 		console.log(
-			"\n🎉 SUCCESS: Complete flow working! Temporary wallet can act like NIC account using executeOnBehalf!"
+			"\n🎉 SUCCESS: Complete gasless flow working! Temporary wallet can act like NIC account using gasless NICPaymaster!"
 		);
 	} catch (error) {
 		console.error("❌ Test failed:", error);
 
-		if (
-			error.message?.includes(
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		console.log("Error details:", errorMessage);
+
+		if (errorMessage.includes("call revert exception")) {
+			console.log(
+				"💡 Solution: Contract call failed - check contract addresses and deployment"
+			);
+		} else if (errorMessage.includes("network")) {
+			console.log("💡 Solution: Check your network connection and RPC URL");
+		} else if (
+			errorMessage.includes(
 				"Only wallet owner or authorized system wallet can create sessions"
 			)
 		) {
@@ -288,10 +388,20 @@ async function main() {
 			console.log(
 				"Run: npx hardhat run deploy/4-paymaster/polygon/authorize-system-wallet.ts --network polygonAmoy"
 			);
-		} else if (error.message?.includes("NIC not registered")) {
+		} else if (errorMessage.includes("NIC not registered")) {
 			console.log("💡 Solution: Register the NIC first");
-		} else if (error.message?.includes("Invalid signature")) {
+		} else if (errorMessage.includes("No valid access")) {
+			console.log("💡 Solution: Check session creation and verification");
+		} else if (errorMessage.includes("insufficient funds")) {
+			console.log(
+				"💡 Solution: Check NICPaymaster balance and fund it if needed"
+			);
+		} else if (errorMessage.includes("Invalid signature")) {
 			console.log("💡 Solution: Check signature generation and message hash");
+		} else {
+			console.log(
+				"💡 Solution: Check contract addresses, network connection, and deployment status"
+			);
 		}
 	}
 }
@@ -299,6 +409,6 @@ async function main() {
 main()
 	.then(() => process.exit(0))
 	.catch((error) => {
-		console.error(error);
+		console.error("Unexpected error:", error);
 		process.exit(1);
 	});

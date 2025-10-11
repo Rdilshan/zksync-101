@@ -10,7 +10,7 @@ const TEST_NIC = "1234";
 const REGISTERED_WALLET = "0x835a5220EC26fcFe855dC0957cE483f03A8Bb028";
 
 async function main() {
-	console.log("=== Testing Session + Paymaster Integration ===");
+	console.log("=== Testing Gasless Paymaster Integration ===");
 	console.log(
 		"Testing if temporary wallet can use paymaster to pay gas for registered wallet transactions"
 	);
@@ -97,17 +97,8 @@ async function main() {
 		console.log("Temporary wallet address:", tempWallet.address);
 		console.log("Temporary wallet private key:", tempWallet.privateKey);
 
-		// Step 4: Fund temporary wallet (needed for executeOnBehalf)
-		console.log("\n--- Step 4: Fund Temporary Wallet ---");
-		const fundTx = await deployer.sendTransaction({
-			to: tempWallet.address,
-			value: ethers.parseEther("0.01"),
-		});
-		await fundTx.wait();
-		console.log("✅ Temporary wallet funded with 0.01 ETH");
-
-		// Step 5: Create session using system wallet
-		console.log("\n--- Step 5: Create Session ---");
+		// Step 4: Create session using system wallet
+		console.log("\n--- Step 4: Create Session ---");
 		const sessionDuration = 24 * 3600; // 24 hours
 		const sessionTx = await registry.createSession(
 			TEST_NIC,
@@ -118,8 +109,8 @@ async function main() {
 		console.log("✅ Session created successfully!");
 		console.log("Transaction hash:", sessionTx.hash);
 
-		// Step 6: Verify session was created
-		console.log("\n--- Step 6: Verify Session ---");
+		// Step 5: Verify session was created
+		console.log("\n--- Step 5: Verify Session ---");
 		const hasAccess = await registry.hasValidAccess(
 			REGISTERED_WALLET,
 			tempWallet.address
@@ -132,6 +123,15 @@ async function main() {
 		}
 		console.log("✅ Session verification successful");
 
+		// Step 6: Register temporary wallet with paymaster
+		console.log("\n--- Step 6: Register Temporary Wallet with Paymaster ---");
+		const registerTx = await nicPaymaster.registerTemporaryWallet(
+			tempWallet.address,
+			REGISTERED_WALLET
+		);
+		await registerTx.wait();
+		console.log("✅ Temporary wallet registered with paymaster");
+
 		// Step 7: Check initial counter state
 		console.log("\n--- Step 7: Check Initial Counter State ---");
 		const initialCounter = await counter.getCounter();
@@ -143,10 +143,10 @@ async function main() {
 			initialUserCounter.toString()
 		);
 
-		// Step 8: Prepare transaction using executeOnBehalf (since paymaster functions not available)
-		console.log("\n--- Step 8: Prepare Transaction with executeOnBehalf ---");
+		// Step 8: Prepare gasless transaction using paymaster
+		console.log("\n--- Step 8: Prepare Gasless Transaction with Paymaster ---");
 		console.log(
-			"🎯 Temporary wallet will execute transaction on behalf of registered wallet"
+			"🎯 Temporary wallet will execute gasless transaction using paymaster"
 		);
 
 		// Connect temporary wallet to provider
@@ -164,12 +164,12 @@ async function main() {
 		console.log("Function data:", functionData);
 		console.log("Target wallet (registered):", REGISTERED_WALLET);
 		console.log(
-			"Temporary wallet will execute on behalf of:",
+			"Temporary wallet will execute gasless transaction for:",
 			REGISTERED_WALLET
 		);
 
-		// Step 8: Check balances before transaction
-		console.log("\n--- Step 8: Balances Before Transaction ---");
+		// Step 9: Check balances before transaction
+		console.log("\n--- Step 9: Balances Before Transaction ---");
 		const relayerBalanceBefore = await ethers.provider.getBalance(
 			deployer.address
 		);
@@ -179,6 +179,7 @@ async function main() {
 		const registeredWalletBalanceBefore = await ethers.provider.getBalance(
 			REGISTERED_WALLET
 		);
+		const paymasterBalanceBefore = await nicPaymaster.getBalance();
 
 		console.log(
 			"Relayer balance:",
@@ -195,28 +196,98 @@ async function main() {
 			ethers.formatEther(registeredWalletBalanceBefore),
 			"ETH"
 		);
-
-		// Step 9: Execute transaction using executeOnBehalf (working method)
-		console.log("\n--- Step 9: Execute Transaction with executeOnBehalf ---");
 		console.log(
-			"🚀 Temporary wallet executing transaction on behalf of registered wallet..."
+			"Paymaster balance:",
+			ethers.formatEther(paymasterBalanceBefore),
+			"ETH"
 		);
-		console.log("💡 Temporary wallet has session access to registered wallet");
-		console.log("💡 Temporary wallet pays gas fees");
 
-		const tx = await registry.connect(tempWalletConnected).executeOnBehalf(
-			REGISTERED_WALLET, // original wallet (registered wallet)
-			counter.target, // target contract
-			functionData // function call data
+		// Step 10: Generate signature for gasless transaction
+		console.log(
+			"\n--- Step 10: Generate Signature for Gasless Transaction ---"
 		);
+
+		// Get current nonce for temporary wallet (start with 0 if function doesn't exist)
+		let currentNonce = 0n;
+		try {
+			currentNonce = await nicPaymaster.getTempWalletNonce(tempWallet.address);
+			console.log(
+				"Current nonce for temporary wallet:",
+				currentNonce.toString()
+			);
+		} catch (error) {
+			console.log(
+				"⚠️  getTempWalletNonce function not available, using nonce 0"
+			);
+			currentNonce = 0n;
+		}
+
+		// Create message hash for signature
+		const messageHash = ethers.keccak256(
+			ethers.AbiCoder.defaultAbiCoder().encode(
+				[
+					"address",
+					"address",
+					"address",
+					"uint256",
+					"bytes",
+					"uint256",
+					"address",
+				],
+				[
+					REGISTERED_WALLET, // originalWallet
+					tempWallet.address, // temporaryWallet
+					counter.target, // target
+					0, // value
+					functionData, // data
+					currentNonce, // nonce
+					NIC_PAYMASTER_ADDRESS, // paymaster address
+				]
+			)
+		);
+
+		// Create Ethereum signed message hash
+		const ethSignedMessageHash = ethers.keccak256(
+			ethers.AbiCoder.defaultAbiCoder().encode(
+				["string", "bytes32"],
+				["\x19Ethereum Signed Message:\n32", messageHash]
+			)
+		);
+
+		// Sign the message with temporary wallet
+		const signature = await tempWallet.signMessage(
+			ethers.getBytes(messageHash)
+		);
+		console.log("✅ Signature generated for gasless transaction");
+
+		// Step 11: Execute gasless transaction using paymaster
+		console.log(
+			"\n--- Step 11: Execute Gasless Transaction with Paymaster ---"
+		);
+		console.log(
+			"🚀 Temporary wallet executing gasless transaction using paymaster..."
+		);
+		console.log("💡 Paymaster will pay all gas fees");
+		console.log("💡 Temporary wallet pays nothing");
+
+		const tx = await nicPaymaster
+			.connect(deployer)
+			.executeGaslessTemporaryTransaction(
+				REGISTERED_WALLET, // originalWallet
+				tempWallet.address, // temporaryWallet
+				counter.target, // target
+				0, // value
+				functionData, // data
+				signature // signature
+			);
 
 		console.log("Transaction hash:", tx.hash);
 		const receipt = await tx.wait();
-		console.log("✅ Transaction successful!");
+		console.log("✅ Gasless transaction successful!");
 		console.log("Gas used:", receipt?.gasUsed.toString() || "unknown");
 
-		// Step 10: Check final state
-		console.log("\n--- Step 10: Final State ---");
+		// Step 12: Check final state
+		console.log("\n--- Step 12: Final State ---");
 		const finalCounter = await counter.getCounter();
 		const finalUserCounter = await counter.getUserCounter(REGISTERED_WALLET);
 
@@ -230,8 +301,8 @@ async function main() {
 		console.log("  - Times incremented:", userIncrementCount.toString());
 		console.log("  - Total increment amount:", userTotalIncremented.toString());
 
-		// Step 11: Check balances after transaction
-		console.log("\n--- Step 11: Balances After Transaction ---");
+		// Step 13: Check balances after transaction
+		console.log("\n--- Step 13: Balances After Transaction ---");
 		const relayerBalanceAfter = await ethers.provider.getBalance(
 			deployer.address
 		);
@@ -241,6 +312,7 @@ async function main() {
 		const registeredWalletBalanceAfter = await ethers.provider.getBalance(
 			REGISTERED_WALLET
 		);
+		const paymasterBalanceAfter = await nicPaymaster.getBalance();
 
 		console.log(
 			"Relayer balance:",
@@ -257,6 +329,11 @@ async function main() {
 			ethers.formatEther(registeredWalletBalanceAfter),
 			"ETH"
 		);
+		console.log(
+			"Paymaster balance:",
+			ethers.formatEther(paymasterBalanceAfter),
+			"ETH"
+		);
 
 		console.log("\n--- Balance Changes ---");
 		console.log(
@@ -267,7 +344,7 @@ async function main() {
 		console.log(
 			"Temporary wallet paid:",
 			ethers.formatEther(tempWalletBalanceBefore - tempWalletBalanceAfter),
-			"ETH (should be 0 - gasless!)"
+			"ETH (should be 0 - completely gasless!)"
 		);
 		console.log(
 			"Registered wallet paid:",
@@ -276,9 +353,14 @@ async function main() {
 			),
 			"ETH (should be 0!)"
 		);
+		console.log(
+			"Paymaster balance change:",
+			ethers.formatEther(paymasterBalanceBefore - paymasterBalanceAfter),
+			"ETH (paymaster covered gas fees)"
+		);
 
-		// Step 12: Verify session is still valid
-		console.log("\n--- Step 12: Verify Session Still Valid ---");
+		// Step 14: Verify session is still valid
+		console.log("\n--- Step 14: Verify Session Still Valid ---");
 		const sessionStillValid = await registry.hasValidAccess(
 			REGISTERED_WALLET,
 			tempWallet.address
@@ -292,11 +374,12 @@ async function main() {
 		console.log("✅ Temporary wallet created:", tempWallet.address);
 		console.log("✅ Session created successfully");
 		console.log("✅ Session verified and active");
+		console.log("✅ Temporary wallet registered with paymaster");
 		console.log("✅ Temporary wallet can control registered wallet");
-		console.log("✅ Transaction executed successfully using executeOnBehalf");
+		console.log("✅ Gasless transaction executed successfully using paymaster");
 		console.log("✅ Counter incremented for registered wallet");
 		console.log(
-			"✅ Gas paid by temporary wallet, registered wallet paid nothing"
+			"✅ Paymaster paid all gas fees, temporary wallet paid nothing"
 		);
 		console.log("✅ Session remains valid after transaction");
 
@@ -306,7 +389,7 @@ async function main() {
 		console.log("Temporary Wallet:", tempWallet.address);
 		console.log("Temporary Private Key:", tempWallet.privateKey);
 		console.log("Session Transaction:", sessionTx.hash);
-		console.log("Counter Transaction:", tx.hash);
+		console.log("Gasless Transaction:", tx.hash);
 		const [expiryTime] = await registry.getSessionInfo(
 			REGISTERED_WALLET,
 			tempWallet.address
@@ -314,8 +397,23 @@ async function main() {
 		console.log("Session Expires:", new Date(Number(expiryTime) * 1000));
 
 		console.log(
-			"\n🎉 SUCCESS: Complete flow working! Temporary wallet can act like NIC account using executeOnBehalf!"
+			"\n🎉 SUCCESS: Complete gasless flow working! Temporary wallet can act like NIC account using paymaster with zero gas fees!"
 		);
+
+		// Verify gasless nature
+		if (tempWalletBalanceBefore === tempWalletBalanceAfter) {
+			console.log("✅ VERIFIED: Temporary wallet paid ZERO gas fees!");
+		} else {
+			console.log(
+				"❌ WARNING: Temporary wallet paid gas fees - not truly gasless!"
+			);
+		}
+
+		if (registeredWalletBalanceBefore === registeredWalletBalanceAfter) {
+			console.log("✅ VERIFIED: Registered wallet paid ZERO gas fees!");
+		} else {
+			console.log("❌ WARNING: Registered wallet paid gas fees!");
+		}
 	} catch (error) {
 		console.error("❌ Test failed:", error);
 
@@ -347,6 +445,8 @@ async function main() {
 			);
 		} else if (errorMessage.includes("Invalid signature")) {
 			console.log("💡 Solution: Check signature generation and message hash");
+		} else if (errorMessage.includes("Temporary wallet access expired")) {
+			console.log("💡 Solution: Check session expiry and create new session");
 		} else {
 			console.log(
 				"💡 Solution: Check contract addresses, network connection, and deployment status"
