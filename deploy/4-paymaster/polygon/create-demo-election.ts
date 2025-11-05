@@ -2,7 +2,7 @@ import {ethers} from "hardhat";
 import * as hre from "hardhat";
 
 // Deployed contract address on Polygon Amoy
-const ELECTION_CONTRACT_ADDRESS = "0x0e20f909e8c6C2A215584e99a01B4d7772A50716";
+const ELECTION_CONTRACT_ADDRESS = "0xa85F3942AB544ece211Dc73819f36940013Fdc02";
 
 async function main() {
 	console.log("=== Creating Demo Election ===");

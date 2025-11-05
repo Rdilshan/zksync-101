@@ -304,4 +304,43 @@ contract ElectionContract is Ownable {
         }
         revert("Candidate not found");
     }
+
+    /**
+     * @dev Get all elections where a voter NIC is registered
+     * @param _voterNIC The NIC of the voter
+     * @return uint256[] Array of election IDs where the voter is registered
+     * @return Election[] Array of election data
+     * @return Voter[] Array of voter information for each election
+     */
+    function getElectionsByVoterNIC(string memory _voterNIC) public view returns (
+        uint256[] memory,
+        Election[] memory,
+        Voter[] memory
+    ) {
+        // First pass: count how many elections the voter is registered in
+        uint256 count = 0;
+        for (uint256 i = 0; i < electionCount; i++) {
+            if (elections[i].exists && bytes(electionVoters[i][_voterNIC].nic).length > 0) {
+                count++;
+            }
+        }
+
+        // Initialize arrays
+        uint256[] memory electionIds = new uint256[](count);
+        Election[] memory electionData = new Election[](count);
+        Voter[] memory voterData = new Voter[](count);
+
+        // Second pass: populate arrays
+        uint256 index = 0;
+        for (uint256 i = 0; i < electionCount; i++) {
+            if (elections[i].exists && bytes(electionVoters[i][_voterNIC].nic).length > 0) {
+                electionIds[index] = i;
+                electionData[index] = elections[i];
+                voterData[index] = electionVoters[i][_voterNIC];
+                index++;
+            }
+        }
+
+        return (electionIds, electionData, voterData);
+    }
 }
