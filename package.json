@@ -36,7 +36,9 @@
     "test:gasless-paymaster": "hardhat test --network hardhat test/4-paymaster/GaslessPaymaster.test.ts",
     "compile": "hardhat compile",
     "clean": "hardhat clean",
-    "test": "hardhat test --network hardhat"
+    "test": "hardhat test --network hardhat",
+    "test:benchmark": "hardhat test --network hardhat test/ElectionContract.benchmark.test.ts",
+    "test:benchmark:polygon": "hardhat test --network polygonAmoy test/ElectionContract.benchmark.test.ts"
   },
   "bugs": {
     "url": "https://github.com/matter-labs/zksync-contract-templates/issues"
