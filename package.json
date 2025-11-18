@@ -38,7 +38,19 @@
     "clean": "hardhat clean",
     "test": "hardhat test --network hardhat",
     "test:benchmark": "hardhat test --network hardhat test/ElectionContract.benchmark.test.ts",
-    "test:benchmark:polygon": "hardhat test --network polygonAmoy test/ElectionContract.benchmark.test.ts"
+    "test:benchmark:polygon": "hardhat test --network polygonAmoy test/ElectionContract.benchmark.test.ts",
+    "deploy:real-verifier": "hardhat run ./deploy/4-paymaster/polygon/deploy-real-verifier.ts",
+    "deploy:real-verifier:polygon": "hardhat run ./deploy/4-paymaster/polygon/deploy-real-verifier.ts --network polygonAmoy",
+    "deploy:zk-election": "hardhat run ./deploy/4-paymaster/polygon/deploy-zk-election.ts",
+    "deploy:zk-election:polygon": "hardhat run ./deploy/4-paymaster/polygon/deploy-zk-election.ts --network polygonAmoy",
+    "create:zk-election": "hardhat run ./deploy/4-paymaster/polygon/create-zk-election.ts",
+    "create:zk-election:polygon": "hardhat run ./deploy/4-paymaster/polygon/create-zk-election.ts --network polygonAmoy",
+    "test:voting-flow": "hardhat run ./deploy/4-paymaster/polygon/test-voting-flow.ts",
+    "test:voting-flow:polygon": "hardhat run ./deploy/4-paymaster/polygon/test-voting-flow.ts --network polygonAmoy",
+    "set:verifier": "hardhat run ./deploy/4-paymaster/polygon/set-verifier.ts",
+    "set:verifier:polygon": "hardhat run ./deploy/4-paymaster/polygon/set-verifier.ts --network polygonAmoy",
+    "verify:contract": "hardhat run ./deploy/4-paymaster/polygon/verify-contract.ts",
+    "verify:contract:polygon": "hardhat run ./deploy/4-paymaster/polygon/verify-contract.ts --network polygonAmoy"
   },
   "bugs": {
     "url": "https://github.com/matter-labs/zksync-contract-templates/issues"
@@ -67,5 +79,9 @@
     "typechain": "^8.3.2",
     "typescript": "^5.8.3",
     "zksync-ethers": "^6.17.0"
+  },
+  "dependencies": {
+    "keccak256": "^1.0.6",
+    "merkletreejs": "^0.6.0"
   }
 }
