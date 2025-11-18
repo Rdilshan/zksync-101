@@ -9,7 +9,7 @@ import {
 
 /**
  * Test voting process with NIC003
- * 
+ *
  * Usage:
  *   npx hardhat run deploy/4-paymaster/polygon/test-nic003-vote.ts --network polygonAmoy
  */
@@ -23,7 +23,9 @@ async function main() {
 	const nicPaymasterAddress =
 		process.env.NIC_PAYMASTER_ADDRESS ||
 		"0xE2D89a2f526e828579Da11AdeE60dDb645303440";
-	const electionId = process.env.ELECTION_ID ? parseInt(process.env.ELECTION_ID) : 2;
+	const electionId = process.env.ELECTION_ID
+		? parseInt(process.env.ELECTION_ID)
+		: 2;
 	const voterNIC = "NIC003";
 	const candidateIndex = 2; // Vote for Candidate C
 
@@ -39,10 +41,14 @@ async function main() {
 	console.log("Deployer (Relayer):", deployer.address);
 
 	// Get contracts
-	const ZKElectionContract = await ethers.getContractFactory("ZK_ElectionContract");
+	const ZKElectionContract = await ethers.getContractFactory(
+		"ZK_ElectionContract"
+	);
 	const zkElection = ZKElectionContract.attach(zkElectionAddress);
 
-	const NICWalletRegistry = await ethers.getContractFactory("NICWalletRegistry");
+	const NICWalletRegistry = await ethers.getContractFactory(
+		"NICWalletRegistry"
+	);
 	const nicRegistry = NICWalletRegistry.attach(nicRegistryAddress);
 
 	const NICPaymaster = await ethers.getContractFactory("NICPaymaster");
@@ -121,25 +127,27 @@ async function main() {
 	console.log("Merkle Proof Length:", merkleProof.length);
 
 	// ZK proof compatible with RealZKVerifier
-	const FIELD_MODULUS = BigInt("21888242871839275222246405745257275088548364400416034343698204186575808495617");
+	const FIELD_MODULUS = BigInt(
+		"21888242871839275222246405745257275088548364400416034343698204186575808495617"
+	);
 	const mockProof = {
 		a: [
 			"0x0000000000000000000000000000000000000000000000000000000000000001",
-			"0x0000000000000000000000000000000000000000000000000000000000000002"
+			"0x0000000000000000000000000000000000000000000000000000000000000002",
 		],
 		b: [
 			[
 				"0x0000000000000000000000000000000000000000000000000000000000000003",
-				"0x0000000000000000000000000000000000000000000000000000000000000004"
+				"0x0000000000000000000000000000000000000000000000000000000000000004",
 			],
 			[
 				"0x0000000000000000000000000000000000000000000000000000000000000005",
-				"0x0000000000000000000000000000000000000000000000000000000000000006"
-			]
+				"0x0000000000000000000000000000000000000000000000000000000000000006",
+			],
 		],
 		c: [
 			"0x0000000000000000000000000000000000000000000000000000000000000007",
-			"0x0000000000000000000000000000000000000000000000000000000000000008"
+			"0x0000000000000000000000000000000000000000000000000000000000000008",
 		],
 		input: [commitment, nullifierHash, candidateIndex, electionId],
 	};
@@ -170,7 +178,15 @@ async function main() {
 	// Create message hash for paymaster signature
 	const messageHash = ethers.keccak256(
 		ethers.solidityPacked(
-			["address", "address", "address", "uint256", "bytes", "uint256", "address"],
+			[
+				"address",
+				"address",
+				"address",
+				"uint256",
+				"bytes",
+				"uint256",
+				"address",
+			],
 			[
 				registeredWallet,
 				temporaryWallet.address,
@@ -185,7 +201,9 @@ async function main() {
 	console.log("Message Hash:", messageHash);
 
 	// Sign with temporary wallet
-	const signature = await temporaryWallet.signMessage(ethers.getBytes(messageHash));
+	const signature = await temporaryWallet.signMessage(
+		ethers.getBytes(messageHash)
+	);
 	console.log("Signature:", signature);
 
 	// Execute through paymaster (relayer pays gas)
@@ -201,7 +219,7 @@ async function main() {
 			functionData,
 			signature
 		);
-	
+
 	const receipt = await paymasterTx.wait();
 
 	console.log("Transaction hash:", receipt?.hash);
@@ -211,11 +229,17 @@ async function main() {
 	// Step 6: Verify results
 	console.log("\n=== Step 6: Verifying Results ===");
 	const updatedElection = await zkElection.elections(electionId);
-	const candidateInfo = await zkElection.getCandidateInfo(electionId, candidateIndex);
+	const candidateInfo = await zkElection.getCandidateInfo(
+		electionId,
+		candidateIndex
+	);
 	const nullifierUsed = await zkElection.nullifiers(electionId, nullifierHash);
 
 	console.log("Total Votes:", updatedElection.totalVotes.toString());
-	console.log(`Candidate ${candidateIndex} (Candidate C) Votes:`, candidateInfo.voteCount.toString());
+	console.log(
+		`Candidate ${candidateIndex} (Candidate C) Votes:`,
+		candidateInfo.voteCount.toString()
+	);
 	console.log("Nullifier Used:", nullifierUsed);
 
 	if (receipt?.status === 1 && nullifierUsed) {
@@ -236,7 +260,7 @@ async function main() {
 	console.log("\n=== Final Election Status ===");
 	const finalElection = await zkElection.elections(electionId);
 	console.log("Total Votes:", finalElection.totalVotes.toString());
-	
+
 	for (let i = 0; i < 3; i++) {
 		const candidate = await zkElection.getCandidateInfo(electionId, i);
 		console.log(`Candidate ${i}: ${candidate.voteCount.toString()} votes`);
@@ -249,4 +273,3 @@ main()
 		console.error(error);
 		process.exit(1);
 	});
-
